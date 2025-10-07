@@ -160,6 +160,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 
 class CourseVideoViewSet(viewsets.ModelViewSet):
+    pagination_class = CustomPagination
     queryset = models.CourseVideo.objects.all().order_by('course_id', 'order')
     serializer_class = serializers.CourseVideoSerializer
 
@@ -168,6 +169,22 @@ class VideoTestViewSet(viewsets.ModelViewSet):
     queryset = models.VideoTest.objects.all().order_by('-created_at')
     serializer_class = serializers.VideoTestSerializer
 
+
+class VideoTestQuestionViewSet(viewsets.ModelViewSet):
+    queryset = models.TestQuestion.objects.all()
+    serializer_class = serializers.TestQuestionSerializer
+
+class VideoTestAnswerViewSet(viewsets.ModelViewSet):
+    queryset = models.TestAnswer.objects.all()
+    serializer_class = serializers.TestAnswerSerializer
+
+class VideoTestResultViewSet(viewsets.ModelViewSet):
+    queryset = models.TestResult.objects.all()
+    serializer_class = serializers.TestResultSerializer
+
+class VideoTestOptionViewSet(viewsets.ModelViewSet):
+    queryset = models.TestOption.objects.all()
+    serializer_class = serializers.TestOptionSerializer
 
 class VideoAssignmentViewSet(viewsets.ModelViewSet):
     queryset = models.VideoAssignment.objects.all().order_by('-created_at')
@@ -944,12 +961,19 @@ class CourseVideoUploadAPIView(APIView):
 
     def post(self, request, *args, **kwargs):
         course_id = request.data.get("course_id")
+        course_type_id = request.data.get("course_type_id")
         if not course_id:
             return Response({"error": "course_id is required"}, status=400)
+        if not course_type_id:
+            return Response({"error": "course_type_id is required"}, status=400)
 
         course = models.Course.objects.filter(id=course_id).first()
         if not course:
             return Response({"error": "Course not found"}, status=404)
+
+        course_type = models.CourseType.objects.filter(id=course_type_id).first()
+        if not course_type:
+            return Response({"error": "CourseType not found"}, status=404)
 
         title = request.data.get("title", "")
         description = request.data.get("description", "")
@@ -989,7 +1013,7 @@ class CourseVideoUploadAPIView(APIView):
                 course_video.save()
             else:
                 course_video = models.CourseVideo.objects.create(
-                    course=course, title=title, description=description, order=order
+                    course=course, title=title, description=description, order=order, course_type=course_type
                 )
 
             self._save_course_video_from_path(course_video, temp_file_path)
@@ -1058,7 +1082,7 @@ class CourseVideoUploadAPIView(APIView):
                     course_video.save()
                 else:
                     course_video = models.CourseVideo.objects.create(
-                        course=course, title=title, description=description, order=order
+                        course=course, title=title, description=description, order=order, course_type=course_type
                     )
 
                 self._save_course_video_from_path(course_video, final_temp_path)
@@ -1423,6 +1447,7 @@ class ReelUploadAPIView(APIView):
 
     def post(self, request, *args, **kwargs):
         file = request.FILES.get("file")
+        channel_id = request.data.get("channel_id")
         if not file:
             return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1433,13 +1458,15 @@ class ReelUploadAPIView(APIView):
         with open(temp_file_path, "wb+") as temp_file:
             for chunk in file.chunks():
                 temp_file.write(chunk)
-        channel = models.Channel.objects.filter(user=request.user).first()  # Chan
+        channel = models.Channel.objects.filter(user=request.user, id=channel_id).first()  # Chan
         reel = models.Reel.objects.create(
             title=request.data.get("title", ""),
             caption=request.data.get("caption", ""),
             upload_file=file,
             created_by=request.user if request.user.is_authenticated else None,
             channel=channel if channel else None,
+            reel_type=request.data.get("reel_type", "none"),
+            reel_type_id_or_slug=request.data.get("reel_type_id_or_slug", ""),
         )
 
         redis_client.set(f"progress:reel:{reel.id}", "processing")
@@ -1520,6 +1547,8 @@ class RandomReelFeedAPIView(APIView):
                 "comments_count": r.comments.count(),
                 "created_at": r.created_at,
                 "liked": liked,  # ✅ yangi qo‘shildi
+                "reel_type": r.reel_type,
+                "reel_type_id_or_slug": r.reel_type_id_or_slug,
                 "user": {
                     "username": r.channel.user.username if r.channel else "Anonymous",
                     "avatar": r.channel.avatar.url if r.channel and r.channel.avatar else None

@@ -17,7 +17,10 @@ router.register(r'channels', views.ChannelViewSet, basename='channel')
 router.register(r'categories', views.CategoryViewSet, basename='category')
 router.register(r'coursecategories', views.CourseCategoryViewSet, basename='coursecategory')
 router.register(r'languages', views.LanguageViewSet, basename='language')
-
+router.register(r'video-test-questions', views.VideoTestQuestionViewSet, basename='video-test-question')
+router.register(r'video-test-answers', views.VideoTestAnswerViewSet, basename='video-test-answer')
+router.register(r'video-test-results', views.VideoTestResultViewSet, basename='video-test-result')
+router.register(r'video-test-options', views.VideoTestOptionViewSet, basename='video-test-option')
 urlpatterns = [
     path('', include(router.urls)),
     path('users/login/', views.LoginAPIView.as_view(), name='api-login'),

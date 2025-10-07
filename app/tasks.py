@@ -231,10 +231,18 @@ def process_course_video_task(self, course_video_id, input_path):
             redis_client.set(f"progress:course_video:{course_video_id}", "error")
             return
 
-        # Save HLS URLs (foydalanuvchi tarafidan kirishda MEDIA_URL ishlatiladi)
-        cv.hls_playlist_url = f"{settings.MEDIA_URL}hls_courses/{course_video_id}/playlist.m3u8"
-        cv.hls_segment_path = f"{settings.MEDIA_URL}hls_courses/{course_video_id}/segment_%05d.ts"
-        cv.save()
+        # Save HLS URLs atomically to avoid any stale instance issues
+        hls_url = f"{settings.MEDIA_URL}hls_courses/{course_video_id}/playlist.m3u8"
+        hls_seg = f"{settings.MEDIA_URL}hls_courses/{course_video_id}/segment_%05d.ts"
+
+        print(hls_url, "hls url")
+        print(hls_seg)
+        updated = CourseVideo.objects.filter(id=course_video_id).update(
+            hls_playlist_url=hls_url,
+            hls_segment_path=hls_seg,
+        )
+        if updated:
+            redis_client.set(f"progress:course_video:{course_video_id}", "saved")
 
         redis_client.set(f"progress:course_video:{course_video_id}", "finished")
 

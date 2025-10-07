@@ -492,6 +492,7 @@ class VideoAssignment(models.Model):
 	allow_multiple_submissions = models.BooleanField(default=False)
 	is_active = models.BooleanField(default=True)
 	created_at = models.DateTimeField(auto_now_add=True)
+	file = models.FileField(upload_to='courses/assignments/', blank=True, null=True)
 
 	def __str__(self):
 		return f"Vazifa: {self.title} ({self.course_video.title})"
@@ -518,6 +519,14 @@ class AssignmentSubmission(models.Model):
 
 class Reel(models.Model):
 	"""Instagram-ga o'xshash qisqa videolar (reels)."""
+	CHOICE_TYPE = (
+		('course', 'Course'),
+		('channel', 'Channel'),
+		('movie', 'Movie'),
+		('course_video', 'Course Video'),
+		('none', 'None')
+	)
+
 	title = models.CharField(max_length=220, blank=True)
 	caption = models.TextField(blank=True)
 	file_url = models.URLField(max_length=2000, blank=True)
@@ -528,7 +537,8 @@ class Reel(models.Model):
 	likes = models.PositiveIntegerField(default=0)
 	views = models.PositiveIntegerField(default=0)
 	created_at = models.DateTimeField(auto_now_add=True)
-
+	reel_type = models.CharField(max_length=20, choices=CHOICE_TYPE, default='none')
+	reel_type_id_or_slug = models.CharField(max_length=220, blank=True)
 	hls_playlist_url = models.CharField(max_length=500, blank=True, null=True)
 
 	def __str__(self):

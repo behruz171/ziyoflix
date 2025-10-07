@@ -379,20 +379,21 @@ class CourseTypeSerializer(serializers.ModelSerializer):
     def get_total_course_videos(self, obj):
         return models.CourseVideo.objects.filter(course_type=obj).count()
 
-    
+
 class CourseVideoSerializer(serializers.ModelSerializer):
     tests_brief = serializers.SerializerMethodField()
     assignments_brief = serializers.SerializerMethodField()
+    course_type_info = serializers.SerializerMethodField()
     class Meta:
         model = models.CourseVideo
         fields = (
             'id', 'course', 'title', 'description', 'file_url', 'upload_file',
             'duration', 'order', 'created_at', 'hls_playlist_url', 'hls_segment_path',
-            'has_test', 'has_assignment', 'tests_brief', 'assignments_brief', 'course_type'
+            'has_test', 'has_assignment', 'tests_brief', 'assignments_brief', 'course_type', 'course_type_info'
         )
         read_only_fields = (
             'created_at', 'hls_playlist_url', 'hls_segment_path', 'has_test', 'has_assignment',
-            'tests_brief', 'assignments_brief'
+            'tests_brief', 'assignments_brief', 'course_type_info'
         )
 
     def get_tests_brief(self, obj):
@@ -403,6 +404,18 @@ class CourseVideoSerializer(serializers.ModelSerializer):
         qs = obj.assignments.filter(is_active=True).only('id', 'title').order_by('id')
         return [{'id': a.id, 'title': a.title} for a in qs]
 
+    def get_course_type_info(self, obj):
+        ct = obj.course_type
+        if not ct:
+            return None
+        return {
+            'id': ct.id,
+            'name': ct.name,
+            'slug': ct.slug,
+            'description': ct.description,
+            'created_by': ct.created_by_id,
+            'price': ct.price,
+        }
 
 # ---- Test/Quiz serializers ----
 class TestOptionSerializer(serializers.ModelSerializer):
@@ -535,7 +548,7 @@ class StudentVideoTestSerializer(serializers.ModelSerializer):
 class VideoAssignmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.VideoAssignment
-        fields = ('id', 'course_video', 'title', 'description', 'created_by', 'due_at', 'max_points', 'allow_multiple_submissions', 'is_active', 'created_at')
+        fields = ('id', 'course_video', 'title', 'description', 'created_by', 'due_at', 'max_points', 'allow_multiple_submissions', 'is_active', 'created_at', 'file')
         read_only_fields = ('created_at', 'created_by')
 
 
@@ -549,7 +562,7 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
 class ReelSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Reel
-        fields = ('id', 'title', 'caption', 'file_url', 'upload_file', 'duration', 'likes', 'views')
+        fields = ('id', 'title', 'caption', 'file_url', 'upload_file', 'duration', 'likes', 'views', 'reel_type', 'reel_type_id_or_slug')
 
 
 

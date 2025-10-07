@@ -88,14 +88,15 @@ class GradeAssignmentSubmissionAPIView(APIView):
     """Vazifa topshiriqni baholash."""
     permission_classes = [IsAuthenticated]
     
-    def post(self, request, submission_id):
+    def post(self, request, submission_id, channel_slug):
         # Faqat o'qituvchi kanallariga tegishli vazifalar
-        teacher_channels = models.Channel.objects.filter(user=request.user)
+        # teacher_channels = models.Channel.objects.filter(user=request.user)
+        teacher_channels = models.Channel.objects.get(slug=channel_slug)
         
         submission = get_object_or_404(
             models.AssignmentSubmission,
             id=submission_id,
-            assignment__course_video__course__channel__in=teacher_channels
+            assignment__course_video__course__channel=teacher_channels
         )
         
         serializer = GradeAssignmentSerializer(
