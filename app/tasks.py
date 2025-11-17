@@ -74,6 +74,13 @@ def process_video_task(self, movie_file_id, input_path):
             if "frame=" in line:
                 redis_client.set(f"progress:{movie_file_id}", line.strip())
 
+        log_path = os.path.join(settings.BASE_DIR, "ffmpeg.log")
+        with open(log_path, "w") as f:
+            for line in process.stdout:
+                f.write(line)
+            for line in process.stderr:
+                f.write(line)
+            
         process.wait()
 
 
