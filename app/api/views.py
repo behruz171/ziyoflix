@@ -1580,7 +1580,7 @@ class VideoStreamAPIView(APIView):
 class UnifiedUploadAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
-    def _save_movie_file_from_path(self, movie, source_path, title, quality, language_id):
+    def _save_movie_file_from_path(self, movie, source_path, title, quality, language_id, season, episode):
         """
         source_path — to'liq yo'l (temp/final) ga olib beradi.
         Bu funksiya MovieFile obyektini yaratadi va upload_file ga saqlaydi.
@@ -1591,6 +1591,8 @@ class UnifiedUploadAPIView(APIView):
             title=title or "",
             quality=quality or "",
             language_id=language_id or None,
+            season=season or None,
+            episode=episode or None,
         )
         # ochib, storage ga saqlaymiz (name = basename, shunda Windows colon muammosi bo'lmaydi)
         with open(source_path, "rb") as f:
@@ -1602,6 +1604,8 @@ class UnifiedUploadAPIView(APIView):
         movie_id = request.data.get("movie_id")
         quality = request.data.get("quality", "")
         language_id = request.data.get("language_id")
+        season = request.data.get("season", "")
+        episode = request.data.get("episode", "")
 
         if not movie_id:
             return Response({"error": "movie_id is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -1632,6 +1636,8 @@ class UnifiedUploadAPIView(APIView):
                 title=request.data.get("title", ""),
                 quality=quality,
                 language_id=language_id,
+                season=season if movie.type == "serial" else None,
+                episode=episode if movie.type == "serial" else None,
             )
 
             # 3) progress va background task (task temp_file_path ni o‘chiradi)
@@ -1700,6 +1706,8 @@ class UnifiedUploadAPIView(APIView):
                     title=title,
                     quality=quality,
                     language_id=language_id,
+                    season=season if movie.type == "serial" else None,
+                    episode=episode if movie.type == "serial" else None,
                 )
 
                 redis_client.set(f"progress:{movie_file.id}", "processing")

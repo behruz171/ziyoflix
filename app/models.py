@@ -147,6 +147,7 @@ class MovieFile(models.Model):
     title = models.CharField(max_length=220, blank=True, help_text='Masalan: main file, trailer')
     file_url = models.URLField(max_length=2000, blank=True, help_text='CDN yoki storage URL')
     upload_file = models.FileField(upload_to='movies/files/', blank=True, null=True)
+    poster = models.ImageField(upload_to='movies/posters/', blank=True, null=True)
     quality = models.CharField(max_length=10, choices=QUALITY_CHOICES, blank=True)
     language = models.ForeignKey(Language, on_delete=models.SET_NULL, blank=True, null=True)
     is_trailer = models.BooleanField(default=False)

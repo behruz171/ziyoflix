@@ -70,7 +70,7 @@ class GetMovieFileSerializer(serializers.ModelSerializer):
         model = models.MovieFile
         fields = [
             "id", "title", "file_url", "upload_file", "quality",
-            "language", "is_trailer", "duration",
+            "language", "is_trailer", "duration", "poster",
             "hls_playlist_url", "hls_segment_path",
             "season", "episode", "created_at"
         ]
@@ -85,7 +85,7 @@ class GetMovieSerializer(serializers.ModelSerializer):
         model = models.Movie
         fields = [
             "id", "title", "slug", "description", "release_date", "duration",
-            "director", "actors", "created_date", "country",
+            "director", "actors", "created_date", "country", 
             "poster", "cover", "categories", "languages", "languages_list", "subtitles",
             "channels", "is_published", "created_at", "type",
             "grouped_files",  # oddiy `files` o‘rniga shu
@@ -94,19 +94,40 @@ class GetMovieSerializer(serializers.ModelSerializer):
 
     def get_grouped_files(self, obj):
         files = obj.files.all().order_by("season", "episode")
+
         grouped = defaultdict(list)
 
         for f in files:
-            grouped[f.season or 0].append(GetMovieFileSerializer(f).data)
+            # Har doim int ga o‘tkazamiz
+            season = f.season or 0
+            try:
+                season = int(season)
+            except:
+                season = 0
 
-        # dictionary → array format (season raqam bilan)
+            grouped[season].append(GetMovieFileSerializer(f).data)
+
+        # Seasonlarni tartiblash
+        grouped = dict(sorted(grouped.items(), key=lambda x: x[0]))
+
         result = []
+
         for season, episodes in grouped.items():
+            # 🔥 Bo‘sh listlar bo‘lmasligi uchun
+            if not episodes:
+                continue
+
+            if obj.type == "movie":
+                # Movie faqat 1 ta list qaytaradi
+                return episodes
+
             result.append({
                 "season": season,
                 "episodes": episodes
             })
+
         return result
+
 class ChannelCardSerializer(serializers.ModelSerializer):
     subscriber_count = serializers.SerializerMethodField()
     videos_count = serializers.SerializerMethodField()
