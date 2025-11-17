@@ -5,3 +5,5 @@ media
 __pycache__
 .idea
 .env
+*.pyc
+__pycache__/
