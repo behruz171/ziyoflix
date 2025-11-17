@@ -38,7 +38,7 @@ def process_video_task(self, movie_file_id, input_path):
         # =============================================================
 
         # Linux uchun
-        ffmpeg_path = "ffmpeg"
+        ffmpeg_path = "/usr/bin/ffmpeg"
 
         # ffmpeg komandasi
         command = [
