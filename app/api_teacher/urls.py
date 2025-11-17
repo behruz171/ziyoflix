@@ -26,7 +26,7 @@ urlpatterns = [
     # TEACHER TESTS LIST & STATS
     path('teacher/<slug:channel_slug>/tests/', views.TeacherTestsListAPIView.as_view(), name='teacher-tests-list'),
     path('teacher/<slug:channel_slug>/tests/stats/', views.TeacherTestsStatsAPIView.as_view(), name='teacher-tests-stats'),
-    path('teacher/<slug:channel_slug>/tests/<int:test_id>/attempts/', views.TeacherTestAttemptsAPIView.as_view(), name='teacher-test-attempts'),
+    path('teacher/<slug:channel_slug>/tests/<str:test_type>/<int:test_id>/attempts/', views.TeacherTestAttemptsAPIView.as_view(), name='teacher-test-attempts'),
     
     # TEACHER ASSIGNMENTS LIST & STATS & SUBMISSIONS
     path('teacher/<slug:channel_slug>/assignments/', views.TeacherAssignmentsListAPIView.as_view(), name='teacher-assignments-list'),

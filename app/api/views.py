@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.core.files import File
 from rest_framework.permissions import *
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from .. import models
 from . import serializers
 import shutil
@@ -20,6 +21,8 @@ import random
 from app.pagination import *
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.http import FileResponse, Http404, HttpResponse
+from django.urls import reverse
 
 
 redis_client = Redis(host="localhost", port=6379, db=0)
@@ -48,6 +51,10 @@ class LoginAPIView(APIView):
                 "username": user.username,
                 "email": user.email,
                 "role": user.role,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "avatar": user.avatar.url if user.avatar else None,
+                "bio": user.bio,
             }
         }, status=status.HTTP_200_OK)
 
@@ -137,6 +144,19 @@ class ReelViewSet(viewsets.ModelViewSet):
     queryset = models.Reel.objects.all().order_by('-created_at')
     serializer_class = serializers.ReelSerializer
 
+
+class ReelSaveAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, reel_id):
+        reel = get_object_or_404(models.Reel, id=reel_id)
+        obj, created = models.ReelSave.objects.get_or_create(user=request.user, reel=reel)
+        return Response({'saved': True, 'created': created}, status=201 if created else 200)
+
+    def delete(self, request, reel_id):
+        reel = get_object_or_404(models.Reel, id=reel_id)
+        models.ReelSave.objects.filter(user=request.user, reel=reel).delete()
+        return Response({'saved': False}, status=200)
 
 class ChannelViewSet(viewsets.ModelViewSet):
     queryset = models.Channel.objects.all().order_by('-created_at')
@@ -288,6 +308,33 @@ class CourseTypeAPIView(generics.ListAPIView):
         }
         all_video_ids = [v.id for vids in vids_by_type.values() for v in vids]
 
+        # Determine purchases for the authenticated user based on purchase scope
+        purchased_full_course = False
+        purchased_type_ids = set()
+        if user and types:
+            scope = getattr(course, 'purchase_scope', 'course')
+            try:
+                if scope == 'course':
+                    # Only full course purchases are relevant
+                    purchased_full_course = models.WalletTransaction.objects.filter(
+                        wallet__user=user,
+                        course=course,
+                        transaction_type='course_purchase'
+                    ).exists()
+                    purchased_type_ids = set()
+                else:
+                    # Scope is 'course_type' → only per-type purchases are relevant
+                    purchased_full_course = False
+                    type_ids = [ct.id for ct in types]
+                    purchased_type_ids = set(models.WalletTransaction.objects.filter(
+                        wallet__user=user,
+                        transaction_type='course_type_purchase',
+                        course_type_id__in=type_ids
+                    ).values_list('course_type_id', flat=True))
+            except Exception:
+                purchased_full_course = False
+                purchased_type_ids = set()
+
         # Build requirement maps across all these videos
         progress_map = {}
         tests_required = set()
@@ -374,11 +421,15 @@ class CourseTypeAPIView(generics.ListAPIView):
             if not user:
                 # only first type unlocked for anonymous
                 data[idx]['is_locked'] = not (idx == 0)
+                # Anonymous users obviously haven't purchased
+                data[idx]['is_purchased'] = False
                 continue
 
             # is current locked due to previous types not completed?
             is_locked = not prev_types_all_ok
             data[idx]['is_locked'] = is_locked
+            # Mark purchase status for authenticated users
+            data[idx]['is_purchased'] = bool(purchased_full_course or (ct.id in purchased_type_ids))
 
             # Compute current type completion (for next types decision)
             vids = vids_by_type.get(ct.id, [])
@@ -456,6 +507,9 @@ class CourseVideosByCourseSlugAndCourseTypeAPIView(generics.ListAPIView):
         passed_by_video = set()
         assignments_required = set()
         submitted_by_video = set()
+        assignment_checked_by_video = set()
+        assignment_grade_by_video = {}
+        assignment_feedback_by_video = {}
 
         if user:
             # Progress completion map
@@ -489,14 +543,28 @@ class CourseVideosByCourseSlugAndCourseTypeAPIView(generics.ListAPIView):
             if assigns:
                 assignments_required = {a['course_video_id'] for a in assigns}
                 assign_ids = [a['id'] for a in assigns]
-                subs = list(models.AssignmentSubmission.objects.filter(assignment_id__in=assign_ids, student=user)
-                            .values('assignment_id'))
+                subs = list(
+                    models.AssignmentSubmission.objects
+                    .filter(assignment_id__in=assign_ids, student=user)
+                    .values('assignment_id', 'grade', 'feedback', 'graded_by_id', 'submitted_at')
+                )
                 if subs:
                     assign_video_map = {a['id']: a['course_video_id'] for a in assigns}
+                    # choose latest graded submission per video if multiple
+                    latest_graded_by_video = {}
                     for s in subs:
                         vid = assign_video_map.get(s['assignment_id'])
-                        if vid:
-                            submitted_by_video.add(vid)
+                        if not vid:
+                            continue
+                        submitted_by_video.add(vid)
+                        if s['graded_by_id'] is not None:
+                            prev = latest_graded_by_video.get(vid)
+                            if not prev or (s['submitted_at'] and s['submitted_at'] > prev.get('submitted_at')):
+                                latest_graded_by_video[vid] = s
+                    for vid, s in latest_graded_by_video.items():
+                        assignment_checked_by_video.add(vid)
+                        assignment_grade_by_video[vid] = s.get('grade')
+                        assignment_feedback_by_video[vid] = s.get('feedback') or ''
 
             # CourseType-level requirements for PRIOR types (CourseTypeTest/CourseTypeAssignment)
             ct_tests = list(models.CourseTypeTest.objects.filter(is_active=True, course_type__in=prior_types)
@@ -571,6 +639,13 @@ class CourseVideosByCourseSlugAndCourseTypeAPIView(generics.ListAPIView):
             # If previous types not complete, or unauthenticated → lock all except first of very first type
             for idx in range(len(current_items)):
                 data[idx]['is_locked'] = True
+                # Add whether the user has passed the test for this video
+                data[idx]['has_passed_test'] = bool(user and current_items[idx].id in passed_by_video)
+                # Add assignment review information (only if graded by a teacher)
+                vid_id = current_items[idx].id
+                data[idx]['assignment_checked'] = bool(user and vid_id in assignment_checked_by_video)
+                data[idx]['assignment_grade'] = assignment_grade_by_video.get(vid_id)
+                data[idx]['assignment_feedback'] = assignment_feedback_by_video.get(vid_id)
             # Special case: very first type and very first video is unlocked
             if user is None and cur_index == 0 and len(current_items) > 0:
                 data[0]['is_locked'] = False
@@ -589,6 +664,12 @@ class CourseVideosByCourseSlugAndCourseTypeAPIView(generics.ListAPIView):
             else:
                 is_locked = not prev_all_ok
             data[idx]['is_locked'] = is_locked
+            # Add whether the user has passed the test for this video
+            data[idx]['has_passed_test'] = bool(user and obj.id in passed_by_video)
+            # Add assignment review information (only if graded by a teacher)
+            data[idx]['assignment_checked'] = bool(user and obj.id in assignment_checked_by_video)
+            data[idx]['assignment_grade'] = assignment_grade_by_video.get(obj.id)
+            data[idx]['assignment_feedback'] = assignment_feedback_by_video.get(obj.id)
             # Update prev_all_ok for next item using current item's full requirements
             prev_all_ok = prev_all_ok and requirements_met(obj.id)
 
@@ -959,6 +1040,40 @@ class CourseVideoUploadAPIView(APIView):
             course_video.upload_file.save(filename, File(f), save=True)
         return course_video
 
+    def _generate_thumbnail(self, video_path: str, output_path: str) -> bool:
+        try:
+            ffmpeg_path = os.path.join(
+                settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
+            )
+            command = [
+                ffmpeg_path,
+                "-y",
+                "-ss", "00:00:01.000",
+                "-i", video_path,
+                "-vframes", "1",
+                output_path,
+            ]
+            subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            return os.path.exists(output_path)
+        except Exception:
+            return False
+
+    def _attach_poster(self, course_video: models.CourseVideo, source_video_path: str, uploaded_poster):
+        if uploaded_poster:
+            course_video.poster.save(uploaded_poster.name, uploaded_poster, save=True)
+            return
+        # Auto-generate from first frame
+        posters_dir = os.path.join(settings.MEDIA_ROOT, "courses", "videos", "posters")
+        os.makedirs(posters_dir, exist_ok=True)
+        output_path = os.path.join(posters_dir, f"course_video_{course_video.id}.jpg")
+        ok = self._generate_thumbnail(source_video_path, output_path)
+        if ok:
+            try:
+                with open(output_path, "rb") as f:
+                    course_video.poster.save(os.path.basename(output_path), File(f), save=True)
+            except Exception:
+                pass
+
     def post(self, request, *args, **kwargs):
         course_id = request.data.get("course_id")
         course_type_id = request.data.get("course_type_id")
@@ -989,6 +1104,7 @@ class CourseVideoUploadAPIView(APIView):
         # Single upload
         if "file" in request.FILES and "chunkIndex" not in request.data:
             uploaded_file = request.FILES["file"]
+            uploaded_poster = request.FILES.get("poster")
 
             temp_dir = os.path.join(settings.MEDIA_ROOT, "temp_courses")
             os.makedirs(temp_dir, exist_ok=True)
@@ -1017,6 +1133,8 @@ class CourseVideoUploadAPIView(APIView):
                 )
 
             self._save_course_video_from_path(course_video, temp_file_path)
+            # Attach poster (provided or generated)
+            self._attach_poster(course_video, temp_file_path, uploaded_poster)
 
             redis_client.set(f"progress:course_video:{course_video.id}", "processing")
             process_course_video_task.delay(course_video.id, temp_file_path)
@@ -1026,6 +1144,7 @@ class CourseVideoUploadAPIView(APIView):
         # Chunked upload
         if "file" in request.FILES and "chunkIndex" in request.data:
             chunk = request.FILES["file"]
+            uploaded_poster = request.FILES.get("poster")
             try:
                 chunk_index = int(request.data["chunkIndex"])
                 total_chunks = int(request.data["totalChunks"])
@@ -1086,6 +1205,8 @@ class CourseVideoUploadAPIView(APIView):
                     )
 
                 self._save_course_video_from_path(course_video, final_temp_path)
+                # Attach poster (provided or generated)
+                self._attach_poster(course_video, final_temp_path, uploaded_poster)
 
                 redis_client.set(f"progress:course_video:{course_video.id}", "processing")
                 process_course_video_task.delay(course_video.id, final_temp_path)
@@ -1112,8 +1233,157 @@ class CourseVideoStreamAPIView(APIView):
             return Response({"error": "CourseVideo not found"}, status=404)
         if not cv.hls_playlist_url:
             return Response({"error": "HLS not ready"}, status=202)
-        return Response({"hls_url": cv.hls_playlist_url})
+        # Always return secure playlist endpoint
+        secure_url = request.build_absolute_uri(
+            reverse('secure_course_video_playlist', args=[cv.id])
+        )
+        return Response({"hls_url": secure_url})
 
+
+def _user_has_access_to_course_video(user, cv: models.CourseVideo) -> bool:
+    """Return True if user can view paid course video's HLS.
+    Rules:
+    - If course is_free -> True
+    - If not authenticated -> False
+    - If superuser -> True
+    - Otherwise, must have a purchase transaction for the course or course_type
+    """
+    if cv.course and getattr(cv.course, 'is_free', False):
+        return True
+    if not user.is_authenticated:
+        return False
+    if getattr(user, 'is_superuser', False):
+        return True
+
+    # Accept either course_purchase or course_type_purchase for this course
+    tx_qs = models.WalletTransaction.objects.filter(wallet__user=user, course=cv.course)
+    if tx_qs.filter(transaction_type='course_purchase').exists():
+        return True
+    if cv.course_type and models.WalletTransaction.objects.filter(
+        wallet__user=user, course=cv.course, course_type=cv.course_type, transaction_type='course_type_purchase'
+    ).exists():
+        return True
+    return False
+
+
+class SecureCourseVideoPlaylistAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, video_id: int):
+        cv = models.CourseVideo.objects.filter(id=video_id).first()
+        if not cv or not cv.hls_playlist_url:
+            return Response({"error": "HLS not ready"}, status=404)
+
+        if not _user_has_access_to_course_video(request.user, cv):
+            return Response({"detail": "Access denied: purchase required"}, status=401)
+
+        # Read original playlist file from disk
+        playlist_path = os.path.join(settings.MEDIA_ROOT, 'hls_courses', str(video_id), 'playlist.m3u8')
+        if not os.path.exists(playlist_path):
+            return Response({"error": "Playlist not found"}, status=404)
+
+        try:
+            with open(playlist_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception:
+            return Response({"error": "Unable to read playlist"}, status=500)
+
+        # Ensure segment URIs are RELATIVE (e.g., segment_00000.ts)
+        lines = []
+        for line in content.splitlines():
+            s = line.strip()
+            if s.endswith('.ts'):
+                # normalize to basename only
+                lines.append(os.path.basename(s))
+            else:
+                lines.append(line)
+        out = "\n".join(lines)
+        return HttpResponse(out, content_type='application/vnd.apple.mpegurl')
+
+
+class SecureCourseVideoSegmentAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, video_id: int, segment: str):
+        cv = models.CourseVideo.objects.filter(id=video_id).first()
+        if not cv or not cv.hls_playlist_url:
+            return Response({"error": "HLS not ready"}, status=404)
+
+        if not _user_has_access_to_course_video(request.user, cv):
+            return Response({"detail": "Access denied: purchase required"}, status=401)
+
+        # Sanitize segment name
+        if not segment.endswith('.ts') or '/' in segment or '\\' in segment:
+            return Response({"error": "Invalid segment"}, status=400)
+
+        seg_path = os.path.join(settings.MEDIA_ROOT, 'hls_courses', str(video_id), segment)
+        if not os.path.exists(seg_path):
+            return Response({"error": "Segment not found"}, status=404)
+        try:
+            return FileResponse(open(seg_path, 'rb'), content_type='video/MP2T')
+        except Exception:
+            return Response({"error": "Unable to read segment"}, status=500)
+
+# yordamchi funksiyalar
+def _get_user_from_request(request):
+    """
+    JWT token bo'lsa userni qaytaradi, yo'q bo'lsa None.
+    Silent: agar token noto'g'ri bo'lsa ham None qaytaradi.
+    """
+    try:
+        auth = JWTAuthentication().authenticate(request)
+        if auth:
+            user, token = auth
+            return user
+    except Exception:
+        pass
+    return None
+
+class ReelHLSProxyView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, video_id):
+        # filename: playlist.m3u8 yoki segment_00001.ts
+        reel = get_object_or_404(models.Reel, id=video_id)
+        base_dir = os.path.join(settings.MEDIA_ROOT, "hls_reels", str(video_id))
+        # Default playlist filename
+        file_path = os.path.join(base_dir, "playlist.m3u8")
+
+        # Robust fallback: if not found, try common names or any .m3u8 in folder
+        if not os.path.isfile(file_path):
+            # Try common alternative names
+            for alt in ("index.m3u8", "master.m3u8"):
+                cand = os.path.join(base_dir, alt)
+                if os.path.isfile(cand):
+                    file_path = cand
+                    break
+            else:
+                try:
+                    files = os.listdir(base_dir)
+                except FileNotFoundError:
+                    return Response({"error": "File not found"}, status=404)
+                found = False
+                for f in files:
+                    if f.endswith(".m3u8"):
+                        file_path = os.path.join(base_dir, f)
+                        found = True
+                        break
+                if not found or not os.path.isfile(file_path):
+                    return Response({"error": "File not found"}, status=404)
+
+        # Token yoki session orqali userni aniqlash
+        user = request.user if request.user.is_authenticated else _get_user_from_request(request)
+        if user is not None:
+            try:
+                models.ReelView.objects.get_or_create(user=user, reel=reel)
+            except Exception:
+                pass
+
+        # Content type
+        content_type = "application/vnd.apple.mpegurl"
+
+        # MUHIM: FileResponse uchun 'with' ishlatmaymiz, aks holda fayl yopilib qoladi
+        return FileResponse(open(file_path, "rb"), content_type=content_type)
 
 class SubmitTestAPIView(APIView):
     """Foydalanuvchi javoblarini qabul qilib, natijani hisoblaydi."""
@@ -1448,6 +1718,7 @@ class ReelUploadAPIView(APIView):
     def post(self, request, *args, **kwargs):
         file = request.FILES.get("file")
         channel_id = request.data.get("channel_id")
+        poster = request.FILES.get("poster")
         if not file:
             return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1467,7 +1738,37 @@ class ReelUploadAPIView(APIView):
             channel=channel if channel else None,
             reel_type=request.data.get("reel_type", "none"),
             reel_type_id_or_slug=request.data.get("reel_type_id_or_slug", ""),
+            poster=poster if poster else None,
         )
+
+        # If poster not provided, auto-generate thumbnail from first frame using ffmpeg
+        if not poster:
+            try:
+                posters_dir = os.path.join(settings.MEDIA_ROOT, "reels", "posters")
+                os.makedirs(posters_dir, exist_ok=True)
+                output_path = os.path.join(posters_dir, f"reel_{reel.id}.jpg")
+
+                ffmpeg_path = os.path.join(
+                    settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
+                )
+
+                # Extract frame at 1 second (fallback to 0 if shorter)
+                command = [
+                    ffmpeg_path,
+                    "-y",
+                    "-ss", "00:00:01.000",
+                    "-i", temp_file_path,
+                    "-vframes", "1",
+                    output_path,
+                ]
+
+                subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+                if os.path.exists(output_path):
+                    with open(output_path, "rb") as f:
+                        reel.poster.save(os.path.basename(output_path), File(f), save=True)
+            except Exception:
+                pass
 
         redis_client.set(f"progress:reel:{reel.id}", "processing")
 
@@ -1535,18 +1836,22 @@ class RandomReelFeedAPIView(APIView):
         data = []
         for r in page:
             liked = False
+            saved = False
             if request.user.is_authenticated:
                 liked = models.LikeReels.objects.filter(user=request.user, reel=r).exists()
+                saved = models.ReelSave.objects.filter(user=request.user, reel=r).exists()
 
             data.append({
                 "id": r.id,
                 "title": r.title,
                 "caption": r.caption,
+                "poster": r.poster.url if r.poster else None,
                 "hls_url": r.hls_playlist_url,
                 "likes_count": r.likes,
                 "comments_count": r.comments.count(),
                 "created_at": r.created_at,
                 "liked": liked,  # ✅ yangi qo‘shildi
+                "saved": saved,
                 "reel_type": r.reel_type,
                 "reel_type_id_or_slug": r.reel_type_id_or_slug,
                 "user": {

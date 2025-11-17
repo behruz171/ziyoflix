@@ -3,6 +3,7 @@ from .. import models
 from collections import defaultdict
 from django.db.models import Avg, Max
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 
 class BannerSerializer(serializers.ModelSerializer):
     target_url = serializers.SerializerMethodField()
@@ -231,6 +232,42 @@ class ChannelCoursesSerializer(serializers.ModelSerializer):
         )
 
 
+class CourseSerializer(serializers.ModelSerializer):
+    channel_info = ChannelCardSerializer(read_only=True, source='channel')
+    is_purchased = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.Course
+        fields = (
+            'id', 'title', 'slug', 'description', 'language', 'is_free', 'price',
+            'level', 'is_new', 'is_bestseller', 'is_serial', 'certificate_available',
+            'students_count', 'rating_avg', 'rating_count', 'lessons_count', 'total_duration_minutes',
+            'thumbnail', 'cover', 'channel', 'channel_info', 'categories', 'language', 'purchase_scope', 'is_purchased'
+        )
+        read_only_fields = (
+            'id', 'created_at', 'channel_info'
+        )
+
+    def get_is_purchased(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        scope = getattr(obj, 'purchase_scope', 'course')
+        if scope == 'course':
+            return models.WalletTransaction.objects.filter(
+                wallet__user=user,
+                course=obj,
+                transaction_type='course_purchase'
+            ).exists()
+        # scope == 'course_type': any type purchase under this course counts
+        return models.WalletTransaction.objects.filter(
+            wallet__user=user,
+            course=obj,
+            transaction_type='course_type_purchase'
+        ).exists()
+
+
 class CourseVideoProgressSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.CourseVideoProgress
@@ -314,7 +351,10 @@ class StudentCourseTypeTestSerializer(serializers.ModelSerializer):
 class CourseTypeAssignmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.CourseTypeAssignment
-        fields = ('id', 'course_type', 'title', 'description', 'created_by', 'due_at', 'max_points', 'allow_multiple_submissions', 'is_active', 'created_at')
+        fields = (
+            'id', 'course_type', 'title', 'description', 'created_by', 'due_at',
+            'due_days_after_completion', 'max_points', 'allow_multiple_submissions', 'is_active', 'created_at'
+        )
         read_only_fields = ('created_at', 'created_by')
 
 
@@ -346,26 +386,14 @@ class CourseTypeTestResultSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'test', 'test_title', 'course_type_id', 'user', 'attempt', 'score', 'started_at', 'completed_at', 'answers'
         )
-
-
 class StudentCourseTypeAssignmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.CourseTypeAssignment
-        fields = ['id', 'title', 'description', 'due_at', 'max_points', 'allow_multiple_submissions', 'is_active', 'created_at']
-
-class CourseSerializer(serializers.ModelSerializer):
-    channel_info = ChannelCardSerializer(read_only=True, source='channel')
-    class Meta:
-        model = models.Course
-        fields = (
-            'id', 'title', 'slug', 'description', 'language', 'is_free', 'price',
-            'level', 'is_new', 'is_bestseller', 'is_serial', 'certificate_available',
-            'students_count', 'rating_avg', 'rating_count', 'lessons_count', 'total_duration_minutes',
-            'thumbnail', 'cover','channel', 'channel_info', 'categories', 'language', 'purchase_scope'
-        )
-        read_only_fields = (
-            'id', 'created_at', 'channel_info'
-        )
+        fields = [
+            'id', 'title', 'description', 'due_at', 'due_days_after_completion', 'max_points',
+            'allow_multiple_submissions', 'is_active', 'created_at'
+        ]
+        read_only_fields = ('created_at',)
 
 class CourseTypeSerializer(serializers.ModelSerializer):
     total_course_videos = serializers.SerializerMethodField()
@@ -373,7 +401,7 @@ class CourseTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.CourseType
         fields = (
-            'id', 'course', 'name', 'slug', 'description', 'created_by', 'price', 'total_course_videos'
+            'id', 'course', 'name', 'slug', 'description',"is_active", 'created_by', 'price', 'total_course_videos'
         )
 
     def get_total_course_videos(self, obj):
@@ -384,11 +412,12 @@ class CourseVideoSerializer(serializers.ModelSerializer):
     tests_brief = serializers.SerializerMethodField()
     assignments_brief = serializers.SerializerMethodField()
     course_type_info = serializers.SerializerMethodField()
+    # hls_playlist_url = serializers.SerializerMethodField()
     class Meta:
         model = models.CourseVideo
         fields = (
-            'id', 'course', 'title', 'description', 'file_url', 'upload_file',
-            'duration', 'order', 'created_at', 'hls_playlist_url', 'hls_segment_path',
+            'id', 'course', 'title', 'description', 'poster', 'file_url', 'upload_file',
+            'duration', 'is_active', 'order', 'created_at', 'hls_playlist_url', 'hls_segment_path',
             'has_test', 'has_assignment', 'tests_brief', 'assignments_brief', 'course_type', 'course_type_info'
         )
         read_only_fields = (
@@ -414,6 +443,7 @@ class CourseVideoSerializer(serializers.ModelSerializer):
             'slug': ct.slug,
             'description': ct.description,
             'created_by': ct.created_by_id,
+            'is_active': ct.is_active,
             'price': ct.price,
         }
 
@@ -562,7 +592,7 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
 class ReelSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Reel
-        fields = ('id', 'title', 'caption', 'file_url', 'upload_file', 'duration', 'likes', 'views', 'reel_type', 'reel_type_id_or_slug')
+        fields = ('id', 'title', 'caption','poster', 'file_url', 'hls_playlist_url', 'duration', 'likes', 'views', 'reel_type', 'reel_type_id_or_slug')
 
 
 

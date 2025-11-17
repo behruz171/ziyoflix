@@ -20,14 +20,15 @@ class WalletTransactionSerializer(serializers.ModelSerializer):
     course_type_name = serializers.CharField(source='course_type.name', read_only=True)
     course_type_id = serializers.IntegerField(source='course_type.id', read_only=True)
     transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
+    promo_code = serializers.CharField(source='promo_code.code', read_only=True)
     
     class Meta:
         model = models.WalletTransaction
         fields = (
             'id', 'username', 'transaction_type', 'transaction_type_display', 
-            'amount', 'balance_after', 'description', 'course_title',
+            'amount', 'original_amount', 'discount_amount', 'balance_after', 'description', 'course_title',
             'course_type_id', 'course_type_name',
-            'from_username', 'to_username', 'created_at'
+            'from_username', 'to_username', 'promo_code', 'created_at'
         )
         read_only_fields = ('id', 'username', 'balance_after', 'created_at')
 
@@ -57,6 +58,7 @@ class WithdrawalSerializer(serializers.Serializer):
 class CoursePurchaseSerializer(serializers.Serializer):
     """Serializer for purchasing a full course."""
     course_id = serializers.IntegerField()
+    promo_code = serializers.CharField(required=False, allow_blank=True)
     
     def validate_course_id(self, value):
         try:
@@ -72,10 +74,27 @@ class CoursePurchaseSerializer(serializers.Serializer):
         except models.Course.DoesNotExist:
             raise serializers.ValidationError("Course not found")
 
+    def validate(self, attrs):
+        code = attrs.get('promo_code')
+        if code:
+            try:
+                promo = models.PromoCode.objects.get(code=code)
+            except models.PromoCode.DoesNotExist:
+                raise serializers.ValidationError({"promo_code": "Promo code not found"})
+            if not promo.is_valid_now:
+                raise serializers.ValidationError({"promo_code": "Promo code is not valid now"})
+            # Scope check: course must be allowed if promo has restrictions
+            course = models.Course.objects.get(id=attrs['course_id'])
+            if promo.courses.exists() and not promo.courses.filter(id=course.id).exists():
+                raise serializers.ValidationError({"promo_code": "Promo not applicable to this course"})
+            attrs['__promo'] = promo
+        return attrs
+
 
 class CourseTypePurchaseSerializer(serializers.Serializer):
     """Serializer for purchasing a specific course type within a course."""
     course_type_id = serializers.IntegerField()
+    promo_code = serializers.CharField(required=False, allow_blank=True)
     
     def validate_course_type_id(self, value):
         try:
@@ -91,6 +110,24 @@ class CourseTypePurchaseSerializer(serializers.Serializer):
             return value
         except models.CourseType.DoesNotExist:
             raise serializers.ValidationError("Course type not found")
+
+    def validate(self, attrs):
+        code = attrs.get('promo_code')
+        if code:
+            try:
+                promo = models.PromoCode.objects.get(code=code)
+            except models.PromoCode.DoesNotExist:
+                raise serializers.ValidationError({"promo_code": "Promo code not found"})
+            if not promo.is_valid_now:
+                raise serializers.ValidationError({"promo_code": "Promo code is not valid now"})
+            ct = models.CourseType.objects.select_related('course').get(id=attrs['course_type_id'])
+            # Restriction checks
+            if promo.course_types.exists() and not promo.course_types.filter(id=ct.id).exists():
+                raise serializers.ValidationError({"promo_code": "Promo not applicable to this course type"})
+            if promo.courses.exists() and not promo.courses.filter(id=ct.course.id).exists():
+                raise serializers.ValidationError({"promo_code": "Promo not applicable to this course"})
+            attrs['__promo'] = promo
+        return attrs
 
 
 class WalletStatsSerializer(serializers.Serializer):

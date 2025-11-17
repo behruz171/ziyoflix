@@ -121,6 +121,7 @@ class CoursePurchaseAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
         course_id = serializer.validated_data['course_id']
+        promo = serializer.validated_data.get('__promo')
         course = get_object_or_404(models.Course, id=course_id)
         
         # Scope check: this course only allows CourseType purchases
@@ -145,14 +146,29 @@ class CoursePurchaseAPIView(APIView):
         
         try:
             seller_user = course.channel.user
-            
+            # Pricing with promo
+            original_amount = course.price
+            discount_amount = 0
+            if promo:
+                if promo.discount_type == 'percent':
+                    discount_amount = (original_amount * promo.value) / Decimal('100')
+                else:  # coins
+                    discount_amount = promo.value
+                if discount_amount < 0:
+                    discount_amount = Decimal('0')
+                if discount_amount > original_amount:
+                    discount_amount = original_amount
+            final_amount = original_amount - discount_amount
             # Process payment
             buyer_transaction, seller_transaction = models.Wallet.transfer_for_course_purchase(
                 buyer_user=request.user,
                 seller_user=seller_user,
                 course=course,
-                amount=course.price,
-                platform_commission_rate=0.05  # 5% commission
+                amount=final_amount,
+                platform_commission_rate=0.05,  # 5% commission
+                original_amount=original_amount,
+                discount_amount=discount_amount,
+                promo_code=promo,
             )
             
             return Response({
@@ -162,7 +178,10 @@ class CoursePurchaseAPIView(APIView):
                 'course': {
                     'id': course.id,
                     'title': course.title,
-                    'price': course.price
+                    'price': str(original_amount),
+                    'discount': str(discount_amount),
+                    'paid_amount': str(final_amount),
+                    'promo_code': promo.code if promo else None,
                 },
                 'transaction_id': buyer_transaction.id
             }, status=status.HTTP_200_OK)
@@ -186,6 +205,7 @@ class CourseTypePurchaseAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
         course_type_id = serializer.validated_data['course_type_id']
+        promo = serializer.validated_data.get('__promo')
         course_type = get_object_or_404(
             models.CourseType.objects.select_related('course', 'course__channel'), 
             id=course_type_id
@@ -218,14 +238,29 @@ class CourseTypePurchaseAPIView(APIView):
             seller_user = course_type.course.channel.user
             
             # Process payment
+            original_amount = price
+            discount_amount = 0
+            if promo:
+                if promo.discount_type == 'percent':
+                    discount_amount = (original_amount * promo.value) / Decimal('100')
+                else:
+                    discount_amount = promo.value
+                if discount_amount < 0:
+                    discount_amount = Decimal('0')
+                if discount_amount > original_amount:
+                    discount_amount = original_amount
+            final_amount = original_amount - discount_amount
             buyer_transaction, seller_transaction = models.Wallet.transfer_for_course_purchase(
                 buyer_user=request.user,
                 seller_user=seller_user,
                 course=course_type.course,
                 course_type=course_type,
-                amount=price,
+                amount=final_amount,
                 platform_commission_rate=0.05,  # 5% commission
-                transaction_type='course_type_purchase'
+                transaction_type='course_type_purchase',
+                original_amount=original_amount,
+                discount_amount=discount_amount,
+                promo_code=promo,
             )
             
             return Response({
@@ -237,7 +272,10 @@ class CourseTypePurchaseAPIView(APIView):
                     'title': course_type.course.title,
                     'course_type_id': course_type.id,
                     'course_type_name': course_type.name,
-                    'price': price
+                    'price': str(original_amount),
+                    'discount': str(discount_amount),
+                    'paid_amount': str(final_amount),
+                    'promo_code': promo.code if promo else None,
                 },
                 'transaction_id': buyer_transaction.id
             }, status=status.HTTP_200_OK)

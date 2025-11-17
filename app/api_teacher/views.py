@@ -491,11 +491,35 @@ class TeacherAssignmentSubmissionsListAPIView(APIView):
         ser = serializers.TeacherAssignmentSubmissionOutSerializer(page, many=True)
         resp = paginator.get_paginated_response(ser.data)
 
+        # Compute late submissions
+        late_count = 0
+        if getattr(assignment, 'due_days_after_completion', None):
+            days = int(assignment.due_days_after_completion)
+            cv = assignment.course_video
+            for s in subs:
+                # Student's completion of the related CourseVideo
+                prog = models.CourseVideoProgress.objects.filter(
+                    user=s.student,
+                    course_video=cv,
+                    completed=True
+                ).order_by('-updated_at').first()
+                if prog:
+                    deadline = prog.updated_at + timedelta(days=days)
+                    if s.submitted_at and s.submitted_at > deadline:
+                        late_count += 1
+                else:
+                    # If student hasn't completed the video, we don't consider it late by this rule
+                    pass
+        else:
+            # Fallback to fixed due_at if provided
+            from django.db.models import F
+            late_count = subs.filter(assignment__due_at__isnull=False, submitted_at__gt=F('assignment__due_at')).count()
+
         stats = {
             'total_submissions': subs.count(),
             'graded_submissions': subs.filter(grade__isnull=False).count(),
             'pending_submissions': subs.filter(grade__isnull=True).count(),
-            'late_submissions': subs.filter(assignment__due_at__isnull=False, submitted_at__gt=F('assignment__due_at')).count(),
+            'late_submissions': late_count,
             'avg_score': float(subs.aggregate(a=Avg('grade'))['a'] or 0),
             'per_student': [
                 {
@@ -690,23 +714,38 @@ class TeacherTestAttemptsAPIView(APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = CustomPagination
 
-    def get(self, request, channel_slug, test_id):
+    def get(self, request, channel_slug, test_id, test_type=None):
         channel = get_object_or_404(models.Channel, slug=channel_slug, user=request.user)
+        # test_type must come from URL and be valid
+        test_type = (test_type or '').lower()
+        if test_type not in ('video', 'course_type'):
+            return Response({'detail': 'Invalid test type. Use "video" or "course_type" in the URL.'}, status=400)
 
-        # Try find as VideoTest
-        test = models.VideoTest.objects.filter(id=test_id, course_video__course__channel=channel).first()
-        test_type = 'video'
-        if not test:
-            # Try CourseTypeTest
+        test = None
+        if test_type == 'video':
+            test = models.VideoTest.objects.filter(id=test_id, course_video__course__channel=channel).first()
+            if not test:
+                return Response({'detail': 'Video test not found or not owned by channel'}, status=404)
+        elif test_type == 'course_type':
             test = models.CourseTypeTest.objects.filter(id=test_id, course_type__course__channel=channel).first()
-            test_type = 'course_type'
-        if not test:
-            return Response({'detail': 'Test not found or not owned by channel'}, status=404)
+            if not test:
+                return Response({'detail': 'Course type test not found or not owned by channel'}, status=404)
+        else:
+            # No explicit type provided → detect, but guard against ID collision
+            vtest = models.VideoTest.objects.filter(id=test_id, course_video__course__channel=channel).first()
+            cttest = models.CourseTypeTest.objects.filter(id=test_id, course_type__course__channel=channel).first()
+            if vtest and cttest:
+                return Response({'detail': 'Ambiguous test id; specify type=video or type=course_type'}, status=400)
+            test = vtest or cttest
+            if not test:
+                return Response({'detail': 'Test not found or not owned by channel'}, status=404)
+            test_type = 'video' if vtest else 'course_type'
 
         # Gather results and answers
         attempts_data = []
         per_student_counts = {}
         if test_type == 'video':
+            print("video test----------------------------------------")
             results = models.TestResult.objects.filter(test=test).select_related('user').order_by('-completed_at', '-started_at')
             # Preload correct options per question
             q_correct_map = {
@@ -736,6 +775,7 @@ class TeacherTestAttemptsAPIView(APIView):
                     'answers': answers,
                 })
         else:
+            print("bu shu yerda bolishi kerak --------------------------------")
             results = models.CourseTypeTestResult.objects.filter(test=test).select_related('user').order_by('-completed_at', '-started_at')
             q_correct_map = {
                 q.id: list(q.options.filter(is_correct=True).values('id', 'text', 'order', 'is_correct'))

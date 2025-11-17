@@ -2,6 +2,7 @@ from rest_framework.routers import DefaultRouter
 from django.urls import path, include
 from . import views
 from . import wallet_views
+from django.urls import include as dj_include
 
 router = DefaultRouter()
 router.register(r'banners', views.BannerViewSet, basename='banner')
@@ -23,6 +24,8 @@ router.register(r'video-test-results', views.VideoTestResultViewSet, basename='v
 router.register(r'video-test-options', views.VideoTestOptionViewSet, basename='video-test-option')
 urlpatterns = [
     path('', include(router.urls)),
+    path('director/', dj_include('app.api_director.urls')),
+    path('user/', include('app.api_user.urls')),
     path('users/login/', views.LoginAPIView.as_view(), name='api-login'),
     path('users/signup/', views.SignUpAPIView.as_view(), name='api-signup'),
     path('homepage/', views.homepage, name='api-homepage'),
@@ -38,6 +41,11 @@ urlpatterns = [
     path('course-video/upload/', views.CourseVideoUploadAPIView.as_view(), name='course_video_upload'),
     path('course-video/<int:video_id>/status/', views.CourseVideoProcessingStatusAPIView.as_view(), name='course_video_status'),
     path('course-video/<int:video_id>/stream/', views.CourseVideoStreamAPIView.as_view(), name='course_video_stream'),
+
+    # Secure HLS endpoints
+    path('course-video/<int:video_id>/playlist.m3u8', views.SecureCourseVideoPlaylistAPIView.as_view(), name='secure_course_video_playlist'),
+    path('course-video/<int:video_id>/<str:segment>', views.SecureCourseVideoSegmentAPIView.as_view(), name='secure_course_video_segment'),
+    
     # Test submit and assignment submit
     path('tests/submit/', views.SubmitTestAPIView.as_view(), name='submit_test'),
     path('assignments/submit/', views.AssignmentSubmitAPIView.as_view(), name='submit_assignment'),
@@ -77,6 +85,7 @@ urlpatterns = [
     path("reel/random-feed/", views.RandomReelFeedAPIView.as_view(), name="reel_random_feed"),
     path("reel/<int:reel_id>/comments/", views.CommentReelAPIView.as_view(), name="reel_comments"),
     path("reel/<int:reel_id>/like/", views.ReelLikeAPIView.as_view(), name="reel_like"),
+    path("reel/<int:reel_id>/save/", views.ReelSaveAPIView.as_view(), name="reel_save"),
 
     path("get-movies/", views.MovieListAPIView.as_view(), name="movie_list"),
     path("get-movies/category/<slug:slug>/", views.MovieByCategoryAPIView.as_view(), name="movie_by_category"),

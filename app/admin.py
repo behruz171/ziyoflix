@@ -142,6 +142,8 @@ admin.site.register(models.CourseTypeTestOption)
 admin.site.register(models.CourseTypeTestResult)
 admin.site.register(models.CourseTypeAssignmentSubmission)
 admin.site.register(models.CourseTypeTestAnswer)
+admin.site.register(models.PromoCode)
+admin.site.register(models.ReelView)
 
 # Wallet models
 class WalletTransactionInline(admin.TabularInline):

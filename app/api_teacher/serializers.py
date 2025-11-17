@@ -23,7 +23,7 @@ class TeacherCourseSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Course
         fields = (
-            'id', 'title', 'slug', 'students_count', 'created_at', 'price','cover', 'thumbnail',
+            'id', 'title', 'slug', 'status', 'reason','is_active', 'students_count', 'created_at', 'price','cover', 'thumbnail',
             'course_types_count', 'videos_count', 'purchase_scope'
         )
 
@@ -43,8 +43,8 @@ class TeacherCourseVideoSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.CourseVideo
         fields = (
-            'id', 'title', 'order', 'duration', 'created_at', 'course_type',
-            'has_test', 'has_assignment'
+            'id', 'title', 'order', 'poster', 'duration', 'created_at', 'course_type',
+            'has_test', 'has_assignment', 'is_active', 'status', 'reason'
         )
 
     def get_has_test(self, obj):
@@ -102,7 +102,7 @@ class TeacherVideoAssignmentSerializer(serializers.ModelSerializer):
         model = models.VideoAssignment
         fields = (
             'id', 'course_video', 'title', 'description', 'due_at', 'max_points',
-            'allow_multiple_submissions', 'is_active', 'created_at',
+            'allow_multiple_submissions', 'is_active', 'created_at', 'due_days_after_completion',
             'submissions_count', 'graded_count', 'avg_grade'
         )
 
@@ -125,7 +125,7 @@ class TeacherReelSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Reel
         fields = (
-            'id', 'title', 'caption', 'duration', 'likes', 'views', 'created_at',
+            'id', 'title', 'caption', 'poster' , 'duration', 'likes', 'views', 'created_at',
             'file_url', 'hls_playlist_url', 'comments_count', 'reel_type', "reel_type_id_or_slug"
         )
 
