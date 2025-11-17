@@ -611,10 +611,13 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
 
 
 class ReelSerializer(serializers.ModelSerializer):
+    views = serializers.SerializerMethodField()
     class Meta:
         model = models.Reel
         fields = ('id', 'title', 'caption','poster', 'file_url', 'hls_playlist_url', 'duration', 'likes', 'views', 'reel_type', 'reel_type_id_or_slug')
 
-
+    def get_views(self, obj):
+        reel_views = models.ReelView.objects.filter(reel=obj).count()
+        return reel_views
 
 

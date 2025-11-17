@@ -67,16 +67,25 @@ class CourseTypeModerationViewSet(viewsets.ModelViewSet):
     lookup_field = 'slug'
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = self.queryset
+        slug = self.request.query_params.get('slug')
+        course_id = self.request.query_params.get('course_id')
+        if slug:
+            qs = qs.filter(slug=slug)
+        if course_id:
+            qs = qs.filter(course_id=course_id)
+
         is_active = self.request.query_params.get('is_active')
         status_val = self.request.query_params.get('status')
         reason = self.request.query_params.get('reason')
+
         if is_active in ['true', 'false']:
             qs = qs.filter(is_active=(is_active == 'true'))
         if status_val in ['moderation', 'rejected', 'approved']:
             qs = qs.filter(status=status_val)
         if reason:
             qs = qs.filter(reason__icontains=reason)
+
         return qs
 
     @action(detail=True, methods=['patch'], url_path='toggle')
@@ -87,6 +96,22 @@ class CourseTypeModerationViewSet(viewsets.ModelViewSet):
         obj.is_active = serializer.validated_data['is_active']
         obj.save(update_fields=['is_active'])
         return Response({'id': obj.id, 'is_active': obj.is_active})
+    
+    @action(detail=True, methods=['patch'], url_path='set-status')
+    def set_status(self, request, slug=None):
+        obj = self.get_object()
+        serializer = s.SetStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        status_val = serializer.validated_data['status']
+        obj.status = status_val
+        obj.is_active = (status_val == 'approved')
+        obj.save(update_fields=['status', 'is_active'])
+        course_videos = models.CourseVideo.objects.filter(course_id=obj.course_id)
+        for course_video in course_videos:
+            course_video.status = status_val
+            course_video.is_active = (status_val == 'approved')
+            course_video.save(update_fields=['status', 'is_active'])
+        return Response({'id': obj.id, 'status': obj.status, 'is_active': obj.is_active})
 
 
 # Moderation: CourseVideo

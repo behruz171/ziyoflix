@@ -29,9 +29,16 @@ def process_video_task(self, movie_file_id, input_path):
         output_m3u8 = os.path.join(output_dir, "playlist.m3u8")
         segment_pattern = os.path.join(output_dir, "segment_%05d.ts")
 
-        ffmpeg_path = os.path.join(
-            settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
-        )
+        # =============================================================
+        # Windows uchun
+        #  
+        # ffmpeg_path = os.path.join(
+        #     settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
+        # )
+        # =============================================================
+
+        # Linux uchun
+        ffmpeg_path = "ffmpeg"
 
         # ffmpeg komandasi
         command = [

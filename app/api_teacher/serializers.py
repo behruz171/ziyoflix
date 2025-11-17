@@ -121,6 +121,7 @@ class TeacherVideoAssignmentSerializer(serializers.ModelSerializer):
 # ===== Teacher Reels serializers =====
 class TeacherReelSerializer(serializers.ModelSerializer):
     comments_count = serializers.SerializerMethodField()
+    views = serializers.SerializerMethodField()
 
     class Meta:
         model = models.Reel
@@ -131,6 +132,10 @@ class TeacherReelSerializer(serializers.ModelSerializer):
 
     def get_comments_count(self, obj):
         return obj.comments.count()
+    
+    def get_views(self, obj):
+        reel_views = models.ReelView.objects.filter(reel=obj).count()
+        return reel_views
 
 
 # =============================
