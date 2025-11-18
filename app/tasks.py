@@ -126,10 +126,11 @@ def process_reel_task(self, reel_id, input_path):
         output_m3u8 = os.path.join(output_dir, "playlist.m3u8")
 
         # ffmpeg manzili
-        ffmpeg_path = os.path.join(
-            settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
-        )
+        # ffmpeg_path = os.path.join(
+        #     settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
+        # )
 
+        ffmpeg_path = "/usr/bin/ffmpeg"
         # segment nomi
         segment_pattern = os.path.join(output_dir, "segment_%05d.ts")
 
@@ -205,10 +206,10 @@ def process_course_video_task(self, course_video_id, input_path):
         output_m3u8 = os.path.join(output_dir, "playlist.m3u8")
         segment_pattern = os.path.join(output_dir, "segment_%05d.ts")
 
-        ffmpeg_path = os.path.join(
-            settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
-        )
-
+        # ffmpeg_path = os.path.join(
+        #     settings.BASE_DIR, "ffmpeg", "ffmpeg-8.0-essentials_build", "bin", "ffmpeg.exe"
+        # )
+        ffmpeg_path = "/usr/bin/ffmpeg"
         command = [
             ffmpeg_path,
             "-i", input_path,
