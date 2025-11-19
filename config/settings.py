@@ -49,6 +49,7 @@ INSTALLED_APPS += [
     "corsheaders",
     'chunked_upload',
     'rest_framework_simplejwt',
+    "corsheaders"
 ]
 
 MIDDLEWARE = [
@@ -64,6 +65,13 @@ MIDDLEWARE = [
 
 CORS_ALLOW_ALL_ORIGINS = True
 ROOT_URLCONF = 'config.urls'
+
+CORS_ALLOWED_ORIGINS = [
+    "https://ziyo-flix-service.uz",
+    "https://www.ziyo-flix-service.uz",
+    "http://localhost:3000",
+    "https://ziyo-flix.vercel.app"
+]
 
 TEMPLATES = [
     {
