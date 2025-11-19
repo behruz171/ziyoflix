@@ -49,7 +49,6 @@ INSTALLED_APPS += [
     "corsheaders",
     'chunked_upload',
     'rest_framework_simplejwt',
-    "corsheaders"
 ]
 
 MIDDLEWARE = [
